@@ -1,4 +1,6 @@
 #include <windows.h>
+#include <stdio.h>
+#include "lodepng.h"
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
@@ -63,8 +65,68 @@ void GetLargestDisplayMode(int *pcxBitmap, int *pcyBitmap)
     while (EnumDisplaySettings(NULL, iModeNum++, &devmode))
     {
         *pcxBitmap = max(*pcxBitmap, (int)devmode.dmPelsWidth);
-        *pcyBitmap = max(*pcyBitmap, (int)devmode.dmPelsWidth);
+        *pcyBitmap = max(*pcyBitmap, (int)devmode.dmPelsHeight);
     }
+}
+
+void SaveBmpAsPng(HBITMAP hBitmap, const char *fileName)
+{
+    BITMAP bmp;
+    GetObject(hBitmap, sizeof(BITMAP), &bmp);
+
+    int width = bmp.bmWidth;
+    int height = bmp.bmHeight;
+
+    // Create a BITMAPINFO structure
+    BITMAPINFOHEADER bi = {0};
+    bi.biSize = sizeof(BITMAPINFOHEADER);
+    bi.biWidth = width;
+    bi.biHeight = -height; // Negative to store in top-down format
+    bi.biPlanes = 1;
+    bi.biBitCount = 32;
+    bi.biCompression = BI_RGB;
+
+    // Allocate buffer for pixel data
+    BYTE *pixels = (BYTE *)malloc(4 * width * height);
+    if (!pixels)
+        return;
+
+    // Create a compatible DC
+    HDC hdcMem = CreateCompatibleDC(NULL);
+    SelectObject(hdcMem, hBitmap);
+
+    // Retrieve pixel data
+    if (!GetDIBits(hdcMem, hBitmap, 0, height, pixels, (BITMAPINFO *)&bi, DIB_RGB_COLORS))
+    {
+        printf("GetDIBits failed\n");
+        free(pixels);
+        DeleteDC(hdcMem);
+        return;
+    }
+
+    // Convert from BGRA to RGBA (swap red and blue channels)
+    // for (int i = 0; i < width * height; ++i)
+    // {
+    //     BYTE *pixel = pixels + i * 4;
+    //     BYTE temp = pixel[0]; // B
+    //     pixel[0] = pixel[2];  // Swap B and R
+    //     pixel[2] = temp;
+    // }
+
+    // Save using LodePNG
+    unsigned error = lodepng_encode32_file(fileName, pixels, width, height);
+    if (error)
+    {
+        printf("Error saving PNG: %s\n", lodepng_error_text(error));
+    }
+    else
+    {
+        MessageBox(NULL, TEXT("Bitmap saved as PNG!"), TEXT("Save PNG"), MB_OK);
+    }
+
+    // Free resources
+    free(pixels);
+    DeleteDC(hdcMem);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -75,6 +137,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     static int cxBitmap, cyBitmap, cxClient, cyClient, xMouse, yMouse;
     HDC hdc;
     PAINTSTRUCT ps;
+
+    // HPEN thick = CreatePen(PS_SOLID, 10, BLACK_BRUSH);
 
     switch (message)
     {
@@ -159,11 +223,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         EndPaint(hwnd, &ps);
         return 0;
 
+    case WM_KEYDOWN:
+        if (wParam == 'S' && GetKeyState(VK_CONTROL) & 0x8000)
+        {
+            // Save the bitmap as a PNG when Ctrl+S is pressed
+            SaveBmpAsPng(hBitmap, "output.png");
+            // MessageBox(hwnd, TEXT("Bitmap saved as PNG!"), TEXT("Save PNG"), MB_OK);
+        }
+        break;
+
     case WM_DESTROY:
         DeleteDC(hdcMem);
         DeleteObject(hBitmap);
         PostQuitMessage(0);
         return 0;
     }
+
     return DefWindowProc(hwnd, message, wParam, lParam);
 }
